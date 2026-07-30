@@ -133,8 +133,20 @@ class LuxTtsService extends GetxService {
       try {
         final client = Get.find<http.Client>();
         final request = http.Request('GET', Uri.parse(file.url));
+        // HuggingFace requires a User-Agent header for direct file downloads
+        request.headers['User-Agent'] = 'EburonEdge/1.0';
         final response = await client.send(request);
         if (response.statusCode != 200) {
+          // HuggingFace may return 302 redirects; http.Client follows them,
+          // but if we get non-200, check content-type for HTML (error page)
+          final contentType = response.headers['content-type'] ?? '';
+          if (contentType.contains('text/html')) {
+            throw Exception(
+              'Download failed (HTTP ${response.statusCode}): '
+              'HuggingFace returned an HTML page instead of the file. '
+              'The file may not exist or the URL may be incorrect.',
+            );
+          }
           throw Exception('Download failed: HTTP ${response.statusCode}');
         }
 

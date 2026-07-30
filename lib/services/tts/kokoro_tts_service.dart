@@ -163,6 +163,7 @@ class KokoroTtsService extends GetxService {
     try {
       final client = Get.find<http.Client>();
       final request = http.Request('GET', Uri.parse(url));
+      request.headers['User-Agent'] = 'EburonEdge/1.0';
       if (startOffset > 0) {
         request.headers['Range'] = 'bytes=$startOffset-';
       }

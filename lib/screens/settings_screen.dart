@@ -10,6 +10,7 @@ import '../services/local_api_server_service.dart';
 import '../services/model_manager.dart';
 import '../services/background_optimizer_service.dart';
 import '../services/chat_storage_service.dart';
+import '../services/log_service.dart';
 import '../services/tts/kokoro_tts_service.dart';
 import '../models/tts_model_info.dart';
 
@@ -368,6 +369,9 @@ class _SettingsBody extends StatelessWidget {
                           const SizedBox(height: 12),
                           // ── Voice selector ──
                           _buildVoiceSelector(context, tts),
+                          const SizedBox(height: 16),
+                          // ── Test TTS button ──
+                          _buildTtsTestButton(context, tts),
                         ],
                       ],
                     ),
@@ -917,6 +921,71 @@ class _SettingsBody extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  Widget _buildTtsTestButton(BuildContext context, KokoroTtsService tts) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () => _runTtsTest(context, tts),
+            icon: const Icon(Icons.bug_report_rounded, size: 18),
+            label: const Text('Test TTS Audio'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.accent,
+              side: BorderSide(
+                color: AppColors.accent.withValues(alpha: 0.5),
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 10),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Plays a test tone, then runs full TTS pipeline. Check App Logs for results.',
+          style: TextStyle(fontSize: 11, color: context.textD),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _runTtsTest(BuildContext context, KokoroTtsService tts) async {
+    final log = Get.find<LogService>();
+    log.info('Starting TTS diagnostic...', source: 'TTS');
+
+    Get.snackbar(
+      'TTS Test',
+      'Running diagnostic... Check App Logs for results.',
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: 2),
+    );
+
+    final results = await tts.testTts();
+    for (final line in results) {
+      if (line.startsWith('✗')) {
+        log.error(line, source: 'TTS');
+      } else if (line.startsWith('✓')) {
+        log.info(line, source: 'TTS');
+      } else {
+        log.info(line, source: 'TTS');
+      }
+    }
+
+    if (context.mounted) {
+      Get.snackbar(
+        'TTS Test Complete',
+        '${results.where((r) => r.startsWith('✓')).length} passed, '
+            '${results.where((r) => r.startsWith('✗')).length} failed. '
+            'See App Logs.',
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: 3),
+      );
+    }
   }
 
   Widget _statusChip(BuildContext context, String text, Color color) {

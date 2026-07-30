@@ -441,6 +441,87 @@ class KokoroTtsService extends GetxService {
 
   String _randomString() => Random().nextInt(100000).toString();
 
+  /// Run a TTS diagnostic test. Returns a list of step results.
+  /// Tests: audio playback, tokenizer, model inference.
+  Future<List<String>> testTts() async {
+    final results = <String>[];
+
+    // 1. Test audio playback with a generated sine wave
+    results.add('--- TTS Diagnostic ---');
+    results.add('State: ${state.value}');
+    results.add('Enabled: ${ttsEnabled.value}');
+    results.add('Voice: ${_selectedVoiceId ?? "none"}');
+    results.add('Model loaded: ${_kokoro != null}');
+
+    try {
+      results.add('--- Test 1: Audio playback (sine wave) ---');
+      final sampleRate = 24000;
+      final durationSec = 0.5;
+      final numSamples = (sampleRate * durationSec).round();
+      final sineWave = Float32List(numSamples);
+      for (int i = 0; i < numSamples; i++) {
+        sineWave[i] = (0.3 * sin(2 * pi * 440 * i / sampleRate));
+      }
+      await _playAudio(sineWave, sampleRate);
+      results.add('✓ Sine wave playback completed');
+    } catch (e) {
+      results.add('✗ Audio playback failed: $e');
+    }
+
+    // 2. Test tokenizer
+    try {
+      results.add('--- Test 2: Tokenizer ---');
+      final tokenizer = Tokenizer();
+      await tokenizer.ensureInitialized();
+      final phonemes = await tokenizer.phonemize('Hello world.', lang: 'en-us');
+      results.add('Phonemes: "$phonemes" (${phonemes.length} chars)');
+      if (phonemes.isNotEmpty && phonemes.length > 5) {
+        results.add('✓ Tokenizer OK');
+      } else {
+        results.add('✗ Tokenizer produced short/empty output');
+      }
+    } catch (e) {
+      results.add('✗ Tokenizer failed: $e');
+    }
+
+    // 3. Test model inference (only if model is loaded)
+    if (_kokoro != null && state.value == TtsState.ready) {
+      try {
+        results.add('--- Test 3: Model inference ---');
+        final tokenizer = Tokenizer();
+        await tokenizer.ensureInitialized();
+        final phonemes = await tokenizer.phonemize('Hello.', lang: 'en-us');
+        final voice = _selectedVoiceId ?? TtsCatalog.defaultVoice.id;
+        results.add('Voice: $voice');
+        final ttsResult = await _kokoro!.createTTS(
+          text: phonemes,
+          voice: voice,
+          isPhonemes: true,
+        );
+        results.add(
+            'Audio samples: ${ttsResult.audio.length}, sampleRate: ${ttsResult.sampleRate}');
+        if (ttsResult.audio.length > 100) {
+          results.add('✓ Model inference OK (${ttsResult.audio.length} samples)');
+          // Play the result
+          final audio = Float32List.fromList(
+            ttsResult.audio.map((e) => e.toDouble()).toList(),
+          );
+          await _playAudio(audio, ttsResult.sampleRate);
+          results.add('✓ Playback completed');
+        } else {
+          results.add('✗ Model produced too few audio samples');
+        }
+      } catch (e) {
+        results.add('✗ Model inference failed: $e');
+      }
+    } else {
+      results.add('--- Test 3: Model inference --- SKIPPED (model not loaded)');
+    }
+
+    results.add('--- Diagnostic complete ---');
+    return results;
+  }
+
   /// Stop current speech playback immediately.
   Future<void> stop() async {
     if (_audioPlayer != null) {

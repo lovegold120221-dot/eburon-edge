@@ -16,28 +16,6 @@ import '../model_manager.dart';
 
 enum TtsState { uninitialized, ready, speaking, error }
 
-/// Tracks download state for a TTS voice or model file.
-class TtsDownloadState {
-  final String id;
-  final double totalBytes;
-  double receivedBytes;
-  double speedBytesPerSec;
-  bool isActive;
-  bool isCancelled;
-
-  TtsDownloadState({
-    required this.id,
-    required this.totalBytes,
-    this.receivedBytes = 0,
-    this.speedBytesPerSec = 0,
-    this.isActive = true,
-    this.isCancelled = false,
-  });
-
-  double get progress =>
-      totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
-}
-
 class KokoroTtsService extends GetxService {
   Kokoro? _kokoro;
   AudioPlayer? _audioPlayer;
@@ -51,12 +29,6 @@ class KokoroTtsService extends GetxService {
   String? _selectedVoiceId;
   String? _currentText;
   String? _modelsDir;
-
-  /// Tracks which voice IDs are downloaded on disk.
-  final downloadedVoices = <String>[].obs;
-
-  /// Tracks active voice downloads with progress.
-  final voiceDownloads = <String, TtsDownloadState>{}.obs;
 
   /// Tracks model download progress.
   final modelDownloadProgress = 0.0.obs;
@@ -83,6 +55,7 @@ class KokoroTtsService extends GetxService {
       final storage = Get.find<ChatStorageService>();
       ttsEnabled.value = storage.ttsEnabled;
       autoPlay.value = storage.ttsAutoPlay;
+      _selectedVoiceId = storage.ttsVoiceId;
     } catch (_) {
       ttsEnabled.value = false;
       autoPlay.value = false;
@@ -162,125 +135,14 @@ class KokoroTtsService extends GetxService {
 
   Future<bool> selectVoice(String voiceId) async {
     _selectedVoiceId = voiceId;
+    try {
+      Get.find<ChatStorageService>().ttsVoiceId = voiceId;
+    } catch (_) {}
     if (kDebugMode) debugPrint('KokoroTts: Selected voice $voiceId');
     return true;
   }
 
-  Future<String> getVoicesDir() async {
-    final dir = await _getTtsDir();
-    final voicesDir = p.join(dir, 'voices');
-    await Directory(voicesDir).create(recursive: true);
-    return voicesDir;
-  }
-
-  /// Scan the voices directory and update [downloadedVoices].
-  Future<void> refreshVoiceStatus() async {
-    final dir = await _getTtsDir();
-    final voicesDir = Directory(p.join(dir, 'voices'));
-    if (!await voicesDir.exists()) {
-      downloadedVoices.value = [];
-      return;
-    }
-    final ids = await voicesDir
-        .list()
-        .where((f) => f is File && f.path.endsWith('.bin'))
-        .map((f) => p.basenameWithoutExtension(f.path))
-        .toList();
-    downloadedVoices.value = ids;
-  }
-
-  /// Check if a specific voice is downloaded.
-  Future<bool> isVoiceDownloaded(String voiceId) async {
-    if (downloadedVoices.contains(voiceId)) return true;
-    final dir = await _getTtsDir();
-    final voicePath = p.join(dir, 'voices', '$voiceId.bin');
-    return await File(voicePath).exists();
-  }
-
-  /// Download a voice file with progress tracking.
-  Future<void> downloadVoice(TtsVoiceInfo voice) async {
-    final voicesDir = await getVoicesDir();
-    final destPath = p.join(voicesDir, voice.filename);
-
-    if (downloadedVoices.contains(voice.id)) return;
-    if (await File(destPath).exists()) {
-      if (!downloadedVoices.contains(voice.id)) {
-        downloadedVoices.add(voice.id);
-      }
-      return;
-    }
-
-    final totalBytes = (voice.sizeMb * 1024 * 1024).toInt();
-    final dlState = TtsDownloadState(
-      id: voice.id,
-      totalBytes: totalBytes.toDouble(),
-    );
-    voiceDownloads[voice.id] = dlState;
-
-    try {
-      final client = Get.find<http.Client>();
-      final request = http.Request('GET', Uri.parse(voice.url));
-      final response = await client.send(request);
-      if (response.statusCode != 200) {
-        throw Exception('Download failed: HTTP ${response.statusCode}');
-      }
-
-      final sink = File(destPath).openWrite();
-      int received = 0;
-      final stopwatch = Stopwatch()..start();
-      int lastSpeedCheck = 0;
-      int lastSpeedBytes = 0;
-
-      await for (final chunk in response.stream) {
-        if (dlState.isCancelled) break;
-
-        sink.add(chunk);
-        received += chunk.length;
-        dlState.receivedBytes = received.toDouble();
-
-        if (stopwatch.elapsedMilliseconds - lastSpeedCheck > 500) {
-          final elapsed =
-              (stopwatch.elapsedMilliseconds - lastSpeedCheck) / 1000;
-          final bytesDelta = received - lastSpeedBytes;
-          dlState.speedBytesPerSec = elapsed > 0 ? bytesDelta / elapsed : 0;
-          lastSpeedCheck = stopwatch.elapsedMilliseconds;
-          lastSpeedBytes = received;
-          voiceDownloads.refresh();
-        }
-      }
-
-      await sink.flush();
-      await sink.close();
-
-      if (!dlState.isCancelled) {
-        if (!downloadedVoices.contains(voice.id)) {
-          downloadedVoices.add(voice.id);
-        }
-      } else {
-        final f = File(destPath);
-        if (await f.exists()) await f.delete();
-      }
-    } catch (e) {
-      final f = File(destPath);
-      if (await f.exists()) await f.delete();
-      rethrow;
-    } finally {
-      voiceDownloads.remove(voice.id);
-    }
-  }
-
-  /// Cancel an active voice download.
-  void cancelVoiceDownload(String voiceId) {
-    final state = voiceDownloads[voiceId];
-    if (state != null) {
-      state.isCancelled = true;
-      state.isActive = false;
-    }
-    voiceDownloads.remove(voiceId);
-  }
-
   /// Download the TTS model (ONNX) with progress and cancel support.
-  /// Saves to [destPath] (should be in the TTS directory).
   Future<void> downloadModel({
     required String url,
     required String destPath,
@@ -353,16 +215,6 @@ class KokoroTtsService extends GetxService {
   void cancelModelDownload() {
     _modelDownloadCancelled = true;
     isModelDownloading.value = false;
-  }
-
-  Future<void> removeVoice(String voiceId) async {
-    final dir = await _getTtsDir();
-    final voicePath = p.join(dir, 'voices', '$voiceId.bin');
-    final file = File(voicePath);
-    if (await file.exists()) {
-      await file.delete();
-    }
-    downloadedVoices.remove(voiceId);
   }
 
   Future<bool> speak(String text) async {

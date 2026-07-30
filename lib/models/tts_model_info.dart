@@ -84,6 +84,42 @@ class TtsModelInfo {
   );
 }
 
+/// Represents a LuxTTS model component file for download tracking.
+class LuxTtsFileInfo {
+  final String id;
+  final String name;
+  final String url;
+  final double sizeMb;
+
+  const LuxTtsFileInfo({
+    required this.id,
+    required this.name,
+    required this.url,
+    required this.sizeMb,
+  });
+
+  String get filename => id;
+}
+
+/// LuxTTS model info — a multi-file ZipVoice-based TTS model.
+class LuxTtsModelInfo {
+  final String id;
+  final String name;
+  final String description;
+  final String baseUrl;
+  final List<LuxTtsFileInfo> files;
+  final double totalSizeMb;
+
+  const LuxTtsModelInfo({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.baseUrl,
+    required this.files,
+    required this.totalSizeMb,
+  });
+}
+
 /// Built-in TTS model catalog — Kokoro-82M ONNX
 class TtsCatalog {
   static const String _baseUrl =
@@ -482,4 +518,58 @@ class TtsCatalog {
     'Hindi': 'Hindi',
     'Portuguese': 'Portuguese',
   };
+
+  // ── LuxTTS ─────────────────────────────────────────────────
+
+  static const String _luxBaseUrl =
+      'https://huggingface.co/buckets/lovegold/LuxTTS-bucket/resolve/main';
+
+  /// LuxTTS — lightweight ZipVoice-based TTS with voice cloning.
+  static const LuxTtsModelInfo luxTts = LuxTtsModelInfo(
+    id: 'lux-tts',
+    name: 'LuxTTS',
+    description:
+        'Lightweight ZipVoice-based TTS with high-quality voice cloning. '
+        '48kHz output, 150x realtime on CPU. Apache-2.0 license.',
+    baseUrl: _luxBaseUrl,
+    totalSizeMb: 627,
+    files: [
+      LuxTtsFileInfo(
+        id: 'text_encoder.onnx',
+        name: 'Text Encoder',
+        url: '$_luxBaseUrl/text_encoder.onnx',
+        sizeMb: 17.6,
+      ),
+      LuxTtsFileInfo(
+        id: 'text_encoder_int8.onnx',
+        name: 'Text Encoder (int8)',
+        url: '$_luxBaseUrl/text_encoder_int8.onnx',
+        sizeMb: 5.57,
+      ),
+      LuxTtsFileInfo(
+        id: 'fm_decoder.onnx',
+        name: 'FM Decoder',
+        url: '$_luxBaseUrl/fm_decoder.onnx',
+        sizeMb: 478,
+      ),
+      LuxTtsFileInfo(
+        id: 'fm_decoder_int8.onnx',
+        name: 'FM Decoder (int8)',
+        url: '$_luxBaseUrl/fm_decoder_int8.onnx',
+        sizeMb: 125,
+      ),
+      LuxTtsFileInfo(
+        id: 'config.json',
+        name: 'Config',
+        url: '$_luxBaseUrl/config.json',
+        sizeMb: 0.0007,
+      ),
+      LuxTtsFileInfo(
+        id: 'tokens.txt',
+        name: 'Tokens',
+        url: '$_luxBaseUrl/tokens.txt',
+        sizeMb: 0.0026,
+      ),
+    ],
+  );
 }

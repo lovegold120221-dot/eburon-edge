@@ -119,4 +119,9 @@ class ChatStorageService extends GetxService {
       _settingsBox.get('tts_auto_play', defaultValue: false) as bool;
 
   set ttsAutoPlay(bool value) => _settingsBox.put('tts_auto_play', value);
+
+  String get ttsVoiceId =>
+      _settingsBox.get('tts_voice_id', defaultValue: 'af_heart') as String;
+
+  set ttsVoiceId(String value) => _settingsBox.put('tts_voice_id', value);
 }

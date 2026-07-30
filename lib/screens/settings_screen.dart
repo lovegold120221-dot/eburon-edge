@@ -11,6 +11,7 @@ import '../services/model_manager.dart';
 import '../services/background_optimizer_service.dart';
 import '../services/chat_storage_service.dart';
 import '../services/tts/kokoro_tts_service.dart';
+import '../models/tts_model_info.dart';
 
 class SettingsScreen extends StatelessWidget {
   /// When true, no Scaffold — just the body content for embedding in tabs.
@@ -364,6 +365,9 @@ class _SettingsBody extends StatelessWidget {
                             activeThumbColor: AppColors.accent,
                             contentPadding: EdgeInsets.zero,
                           ),
+                          const SizedBox(height: 12),
+                          // ── Voice selector ──
+                          _buildVoiceSelector(context, tts),
                         ],
                       ],
                     ),
@@ -840,6 +844,78 @@ class _SettingsBody extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: child,
+    );
+  }
+
+  Widget _buildVoiceSelector(BuildContext context, KokoroTtsService tts) {
+    final voices = tts.availableVoices;
+    final selectedId = tts.selectedVoiceId ?? TtsCatalog.defaultVoice.id;
+    final selectedVoice = tts.getVoice(selectedId);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.record_voice_over_rounded,
+              size: 18,
+              color: context.textM,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Voice',
+              style: TextStyle(
+                color: context.text,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: context.bgInput,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: context.border),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: selectedId,
+              isExpanded: true,
+              dropdownColor: context.bgPanel,
+              style: TextStyle(
+                fontSize: 14,
+                color: context.text,
+              ),
+              items: voices.map((voice) {
+                final label = voice.accent != null
+                    ? '${voice.name} (${voice.accent})'
+                    : voice.name;
+                return DropdownMenuItem(
+                  value: voice.id,
+                  child: Text(label, overflow: TextOverflow.ellipsis),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  tts.selectVoice(val);
+                }
+              },
+            ),
+          ),
+        ),
+        if (selectedVoice != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 4),
+            child: Text(
+              '${selectedVoice.language} · ${selectedVoice.gender}',
+              style: TextStyle(fontSize: 11, color: context.textD),
+            ),
+          ),
+      ],
     );
   }
 

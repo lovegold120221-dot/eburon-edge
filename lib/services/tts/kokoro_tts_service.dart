@@ -1,0 +1,568 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
+import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
+import 'package:kokoro_tts_flutter/kokoro_tts_flutter.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+import '../../models/tts_model_info.dart';
+import '../chat_storage_service.dart';
+import '../model_manager.dart';
+
+enum TtsState { uninitialized, ready, speaking, error }
+
+/// Tracks download state for a TTS voice or model file.
+class TtsDownloadState {
+  final String id;
+  final double totalBytes;
+  double receivedBytes;
+  double speedBytesPerSec;
+  bool isActive;
+  bool isCancelled;
+
+  TtsDownloadState({
+    required this.id,
+    required this.totalBytes,
+    this.receivedBytes = 0,
+    this.speedBytesPerSec = 0,
+    this.isActive = true,
+    this.isCancelled = false,
+  });
+
+  double get progress =>
+      totalBytes > 0 ? (receivedBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
+}
+
+class KokoroTtsService extends GetxService {
+  Kokoro? _kokoro;
+  AudioPlayer? _audioPlayer;
+  StreamSubscription? _playerStateSub;
+
+  final state = TtsState.uninitialized.obs;
+  final isSpeaking = false.obs;
+  final ttsEnabled = false.obs;
+  final autoPlay = false.obs;
+
+  String? _selectedVoiceId;
+  String? _currentText;
+  String? _modelsDir;
+
+  /// Tracks which voice IDs are downloaded on disk.
+  final downloadedVoices = <String>[].obs;
+
+  /// Tracks active voice downloads with progress.
+  final voiceDownloads = <String, TtsDownloadState>{}.obs;
+
+  /// Tracks model download progress.
+  final modelDownloadProgress = 0.0.obs;
+  final modelDownloadSpeed = 0.0.obs;
+  final isModelDownloading = false.obs;
+  bool _modelDownloadCancelled = false;
+
+  /// The expected ONNX model filename once downloaded.
+  static const _modelFilename = 'kokoro-82m.onnx';
+
+  String? get selectedVoiceId => _selectedVoiceId;
+  List<TtsVoiceInfo> get availableVoices => TtsCatalog.voices;
+  TtsVoiceInfo? getVoice(String id) => TtsCatalog.getVoice(id);
+
+  @override
+  void onInit() {
+    super.onInit();
+    _initSettings();
+    _tryAutoLoad();
+  }
+
+  void _initSettings() {
+    try {
+      final storage = Get.find<ChatStorageService>();
+      ttsEnabled.value = storage.ttsEnabled;
+      autoPlay.value = storage.ttsAutoPlay;
+    } catch (_) {
+      ttsEnabled.value = false;
+      autoPlay.value = false;
+    }
+  }
+
+  Future<void> _tryAutoLoad() async {
+    try {
+      final modelPath = await _findOnnxModelPath();
+      if (modelPath == null) {
+        debugPrint('KokoroTts: No ONNX model found, TTS unavailable');
+        return;
+      }
+      debugPrint('KokoroTts: Auto-loading model from $modelPath');
+      await loadModel(modelPath);
+    } catch (e) {
+      if (kDebugMode) debugPrint('KokoroTts: Auto-load skipped: $e');
+    }
+  }
+
+  /// Look for a previously downloaded ONNX model in the TTS directory.
+  Future<String?> _findOnnxModelPath() async {
+    final dir = await _getTtsDir();
+    final candidate = p.join(dir, _modelFilename);
+    if (await File(candidate).exists()) return candidate;
+    return null;
+  }
+
+  Future<String> _getTtsDir() async {
+    if (_modelsDir != null) return _modelsDir!;
+    try {
+      final manager = Get.find<ModelManager>();
+      _modelsDir = p.join(manager.modelsDir, 'tts');
+      await Directory(_modelsDir!).create(recursive: true);
+      return _modelsDir!;
+    } catch (e) {
+      final appDir = await getApplicationDocumentsDirectory();
+      _modelsDir = p.join(appDir.path, 'EburonEdge', 'tts');
+      await Directory(_modelsDir!).create(recursive: true);
+      return _modelsDir!;
+    }
+  }
+
+  Future<void> loadModel(String modelPath) async {
+    try {
+      state.value = TtsState.uninitialized;
+      await _unloadKokoro();
+
+      _kokoro = Kokoro(KokoroConfig(
+        modelPath: modelPath,
+        voicesPath: 'assets/voices.json',
+      ));
+      await _kokoro!.initialize();
+
+      state.value = TtsState.ready;
+      if (kDebugMode) debugPrint('KokoroTts: Model loaded from $modelPath');
+    } catch (e) {
+      state.value = TtsState.error;
+      if (kDebugMode) debugPrint('KokoroTts: Failed to load model: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> unloadModel() async {
+    await _unloadKokoro();
+    state.value = TtsState.uninitialized;
+  }
+
+  Future<void> _unloadKokoro() async {
+    if (_kokoro != null) {
+      try {
+        await _kokoro!.dispose();
+      } catch (_) {}
+      _kokoro = null;
+    }
+  }
+
+  Future<bool> selectVoice(String voiceId) async {
+    _selectedVoiceId = voiceId;
+    if (kDebugMode) debugPrint('KokoroTts: Selected voice $voiceId');
+    return true;
+  }
+
+  Future<String> getVoicesDir() async {
+    final dir = await _getTtsDir();
+    final voicesDir = p.join(dir, 'voices');
+    await Directory(voicesDir).create(recursive: true);
+    return voicesDir;
+  }
+
+  /// Scan the voices directory and update [downloadedVoices].
+  Future<void> refreshVoiceStatus() async {
+    final dir = await _getTtsDir();
+    final voicesDir = Directory(p.join(dir, 'voices'));
+    if (!await voicesDir.exists()) {
+      downloadedVoices.value = [];
+      return;
+    }
+    final ids = await voicesDir
+        .list()
+        .where((f) => f is File && f.path.endsWith('.bin'))
+        .map((f) => p.basenameWithoutExtension(f.path))
+        .toList();
+    downloadedVoices.value = ids;
+  }
+
+  /// Check if a specific voice is downloaded.
+  Future<bool> isVoiceDownloaded(String voiceId) async {
+    if (downloadedVoices.contains(voiceId)) return true;
+    final dir = await _getTtsDir();
+    final voicePath = p.join(dir, 'voices', '$voiceId.bin');
+    return await File(voicePath).exists();
+  }
+
+  /// Download a voice file with progress tracking.
+  Future<void> downloadVoice(TtsVoiceInfo voice) async {
+    final voicesDir = await getVoicesDir();
+    final destPath = p.join(voicesDir, voice.filename);
+
+    if (downloadedVoices.contains(voice.id)) return;
+    if (await File(destPath).exists()) {
+      if (!downloadedVoices.contains(voice.id)) {
+        downloadedVoices.add(voice.id);
+      }
+      return;
+    }
+
+    final totalBytes = (voice.sizeMb * 1024 * 1024).toInt();
+    final dlState = TtsDownloadState(
+      id: voice.id,
+      totalBytes: totalBytes.toDouble(),
+    );
+    voiceDownloads[voice.id] = dlState;
+
+    try {
+      final client = Get.find<http.Client>();
+      final request = http.Request('GET', Uri.parse(voice.url));
+      final response = await client.send(request);
+      if (response.statusCode != 200) {
+        throw Exception('Download failed: HTTP ${response.statusCode}');
+      }
+
+      final sink = File(destPath).openWrite();
+      int received = 0;
+      final stopwatch = Stopwatch()..start();
+      int lastSpeedCheck = 0;
+      int lastSpeedBytes = 0;
+
+      await for (final chunk in response.stream) {
+        if (dlState.isCancelled) break;
+
+        sink.add(chunk);
+        received += chunk.length;
+        dlState.receivedBytes = received.toDouble();
+
+        if (stopwatch.elapsedMilliseconds - lastSpeedCheck > 500) {
+          final elapsed =
+              (stopwatch.elapsedMilliseconds - lastSpeedCheck) / 1000;
+          final bytesDelta = received - lastSpeedBytes;
+          dlState.speedBytesPerSec = elapsed > 0 ? bytesDelta / elapsed : 0;
+          lastSpeedCheck = stopwatch.elapsedMilliseconds;
+          lastSpeedBytes = received;
+          voiceDownloads.refresh();
+        }
+      }
+
+      await sink.flush();
+      await sink.close();
+
+      if (!dlState.isCancelled) {
+        if (!downloadedVoices.contains(voice.id)) {
+          downloadedVoices.add(voice.id);
+        }
+      } else {
+        final f = File(destPath);
+        if (await f.exists()) await f.delete();
+      }
+    } catch (e) {
+      final f = File(destPath);
+      if (await f.exists()) await f.delete();
+      rethrow;
+    } finally {
+      voiceDownloads.remove(voice.id);
+    }
+  }
+
+  /// Cancel an active voice download.
+  void cancelVoiceDownload(String voiceId) {
+    final state = voiceDownloads[voiceId];
+    if (state != null) {
+      state.isCancelled = true;
+      state.isActive = false;
+    }
+    voiceDownloads.remove(voiceId);
+  }
+
+  /// Download the TTS model (ONNX) with progress and cancel support.
+  /// Saves to [destPath] (should be in the TTS directory).
+  Future<void> downloadModel({
+    required String url,
+    required String destPath,
+    required int totalBytes,
+  }) async {
+    _modelDownloadCancelled = false;
+    isModelDownloading.value = true;
+    modelDownloadProgress.value = 0.0;
+    modelDownloadSpeed.value = 0.0;
+
+    final file = File(destPath);
+    int startOffset = 0;
+    if (await file.exists()) {
+      startOffset = await file.length();
+    }
+
+    try {
+      final client = Get.find<http.Client>();
+      final request = http.Request('GET', Uri.parse(url));
+      if (startOffset > 0) {
+        request.headers['Range'] = 'bytes=$startOffset-';
+      }
+      final response = await client.send(request);
+      if (response.statusCode != 200 && response.statusCode != 206) {
+        throw Exception('Download failed: HTTP ${response.statusCode}');
+      }
+
+      final sink = file.openWrite(mode: FileMode.writeOnlyAppend);
+      int downloaded = startOffset;
+      final stopwatch = Stopwatch()..start();
+      int lastReported = startOffset;
+
+      try {
+        await for (final chunk in response.stream) {
+          if (_modelDownloadCancelled) break;
+
+          sink.add(chunk);
+          downloaded += chunk.length;
+          modelDownloadProgress.value =
+              totalBytes > 0 ? downloaded / totalBytes : 0.0;
+
+          final elapsed = stopwatch.elapsedMilliseconds;
+          if (elapsed > 100) {
+            final bytesSinceLastReport = downloaded - lastReported;
+            modelDownloadSpeed.value =
+                bytesSinceLastReport / (elapsed / 1000.0);
+            lastReported = downloaded;
+            stopwatch.reset();
+          }
+        }
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+
+      if (_modelDownloadCancelled) {
+        if (await file.exists()) await file.delete();
+      } else {
+        modelDownloadProgress.value = 1.0;
+      }
+    } catch (e) {
+      if (await file.exists()) await file.delete();
+      rethrow;
+    } finally {
+      isModelDownloading.value = false;
+    }
+  }
+
+  /// Cancel an in-progress model download.
+  void cancelModelDownload() {
+    _modelDownloadCancelled = true;
+    isModelDownloading.value = false;
+  }
+
+  Future<void> removeVoice(String voiceId) async {
+    final dir = await _getTtsDir();
+    final voicePath = p.join(dir, 'voices', '$voiceId.bin');
+    final file = File(voicePath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+    downloadedVoices.remove(voiceId);
+  }
+
+  Future<bool> speak(String text) async {
+    if (!ttsEnabled.value || text.isEmpty) return false;
+    if (state.value != TtsState.ready) {
+      if (kDebugMode) debugPrint('KokoroTts: Model not loaded');
+      return false;
+    }
+    final voice = _selectedVoiceId ?? TtsCatalog.defaultVoice.id;
+    try {
+      isSpeaking.value = true;
+      _currentText = text;
+
+      final result = await _kokoro!.createTTS(
+        text: text,
+        voice: voice,
+        isPhonemes: false,
+        lang: 'en-us',
+      );
+      if (result.audio.isNotEmpty) {
+        final audio = Float32List.fromList(
+          result.audio.map((e) => e.toDouble()).toList(),
+        );
+        await _playAudio(audio, result.sampleRate);
+      }
+      isSpeaking.value = false;
+      _currentText = null;
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('KokoroTts: speak error: $e');
+      isSpeaking.value = false;
+      _currentText = null;
+      return false;
+    }
+  }
+
+  Future<void> _playAudio(Float32List audio, int sampleRate) async {
+    if (audio.isEmpty) return;
+
+    await _disposePlayer();
+
+    final wavBytes = _encodeWav(audio, sampleRate);
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File(
+      p.join(tempDir.path, 'kokoro_tts_${_randomString()}.wav'),
+    );
+    await tempFile.writeAsBytes(wavBytes);
+
+    try {
+      _audioPlayer = AudioPlayer();
+      final completer = Completer<void>();
+
+      _playerStateSub = _audioPlayer!.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted) completer.complete();
+      });
+
+      // Fallback timeout in case playback never completes
+      final estimatedMs = (audio.length / sampleRate * 1000).round() + 2000;
+      Timer(
+        estimatedMs > 0
+            ? Duration(milliseconds: estimatedMs)
+            : const Duration(seconds: 5),
+        () {
+          if (!completer.isCompleted) completer.complete();
+        },
+      );
+
+      await _audioPlayer!.play(DeviceFileSource(tempFile.path));
+      await completer.future;
+
+      try {
+        if (await tempFile.exists()) await tempFile.delete();
+      } catch (_) {}
+    } catch (e) {
+      if (kDebugMode) debugPrint('KokoroTts: Audio playback error: $e');
+    } finally {
+      await _disposePlayer();
+    }
+  }
+
+  Future<void> _disposePlayer() async {
+    await _playerStateSub?.cancel();
+    _playerStateSub = null;
+    if (_audioPlayer != null) {
+      try {
+        await _audioPlayer!.dispose();
+      } catch (_) {}
+      _audioPlayer = null;
+    }
+  }
+
+  Uint8List _encodeWav(Float32List samples, int sampleRate) {
+    final numChannels = 1;
+    final bitsPerSample = 16;
+    final byteRate = sampleRate * numChannels * bitsPerSample ~/ 8;
+    final blockAlign = numChannels * bitsPerSample ~/ 8;
+    final dataSize = samples.length * bitsPerSample ~/ 8;
+    final fileSize = 44 + dataSize;
+    final writer = BytesBuilder();
+    _writeString(writer, 'RIFF');
+    _writeInt32(writer, fileSize - 8);
+    _writeString(writer, 'WAVE');
+    _writeString(writer, 'fmt ');
+    _writeInt32(writer, 16);
+    _writeInt16(writer, 1);
+    _writeInt16(writer, numChannels);
+    _writeInt32(writer, sampleRate);
+    _writeInt32(writer, byteRate);
+    _writeInt16(writer, blockAlign);
+    _writeInt16(writer, bitsPerSample);
+    _writeString(writer, 'data');
+    _writeInt32(writer, dataSize);
+    for (final sample in samples) {
+      final clamped = sample.clamp(-1.0, 1.0);
+      final intSample =
+          (clamped * 32767).round().clamp(-32768, 32767);
+      _writeInt16(writer, intSample);
+    }
+    return writer.toBytes();
+  }
+
+  void _writeString(BytesBuilder builder, String s) =>
+      builder.add(s.codeUnits);
+  void _writeInt32(BytesBuilder builder, int value) {
+    builder.addByte(value & 0xFF);
+    builder.addByte((value >> 8) & 0xFF);
+    builder.addByte((value >> 16) & 0xFF);
+    builder.addByte((value >> 24) & 0xFF);
+  }
+
+  void _writeInt16(BytesBuilder builder, int value) {
+    builder.addByte(value & 0xFF);
+    builder.addByte((value >> 8) & 0xFF);
+  }
+
+  String _randomString() => Random().nextInt(100000).toString();
+
+  /// Stop current speech playback immediately.
+  Future<void> stop() async {
+    if (_audioPlayer != null) {
+      try {
+        await _audioPlayer!.stop();
+      } catch (_) {}
+      await _disposePlayer();
+    }
+    isSpeaking.value = false;
+    _currentText = null;
+  }
+
+  Future<void> togglePlay(String text) async {
+    if (isSpeaking.value && _currentText == text) {
+      await stop();
+    } else {
+      await stop();
+      await speak(text);
+    }
+  }
+
+  bool isSpeakingThis(String text) =>
+      isSpeaking.value && _currentText == text;
+
+  void setEnabled(bool val) {
+    ttsEnabled.value = val;
+    try {
+      Get.find<ChatStorageService>().ttsEnabled = val;
+    } catch (_) {}
+    if (!val) stop();
+  }
+
+  void setAutoPlay(bool val) {
+    autoPlay.value = val;
+    try {
+      Get.find<ChatStorageService>().ttsAutoPlay = val;
+    } catch (_) {}
+  }
+
+  /// Check if the ONNX model file exists in the TTS directory.
+  Future<bool> hasModelDownloaded() async {
+    final dir = await _getTtsDir();
+    return await File(p.join(dir, _modelFilename)).exists();
+  }
+
+  /// Get path to the downloaded ONNX model in the TTS directory.
+  Future<String?> getDownloadedModelPath() async {
+    final dir = await _getTtsDir();
+    final path = p.join(dir, _modelFilename);
+    if (await File(path).exists()) return path;
+    return null;
+  }
+
+  /// Get the destination path where the model should be saved.
+  Future<String> getModelDestPath() async {
+    final dir = await _getTtsDir();
+    return p.join(dir, _modelFilename);
+  }
+
+  @override
+  void onClose() {
+    stop();
+    _unloadKokoro();
+    super.onClose();
+  }
+}

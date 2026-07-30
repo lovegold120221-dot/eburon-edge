@@ -1,0 +1,14 @@
+[
+  {
+    "id": "beatrice-os",
+    "name": "Beatrice-OS",
+    "filename": "beatrice-os.gguf",
+    "url": "https://drive.usercontent.google.com/download?id=1DLYbw-SU6iJAcS_KXkrKVIFZBIFri8Uv&export=download&confirm=t",
+    "sizeGb": 0.258,
+    "minRamGb": 2,
+    "label": "UNCENSORED",
+    "badge": "",
+    "systemPrompt": "",
+    "recommended": true
+  }
+]

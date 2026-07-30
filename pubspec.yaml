@@ -67,6 +67,8 @@ flutter:
   assets:
     - assets/models_catalog.json
     - assets/voices.json
+    - assets/us_gold.json
+    - assets/us_silver.json
 
 flutter_launcher_icons:
   android: true

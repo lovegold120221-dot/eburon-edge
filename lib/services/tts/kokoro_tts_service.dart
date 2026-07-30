@@ -231,7 +231,6 @@ class KokoroTtsService extends GetxService {
     _log('Speaking: "${text.substring(0, text.length.clamp(0, 80))}..." voice=$voice');
 
     // Split long text into sentences to stay within the tokenizer's 510-phoneme limit.
-    // Each sentence is synthesized separately and played sequentially.
     final sentences = _splitSentences(text);
     if (sentences.length > 1) {
       _log('Split into ${sentences.length} sentences');
@@ -241,15 +240,28 @@ class KokoroTtsService extends GetxService {
     _currentText = text;
 
     try {
+      // Create a tokenizer for G2P phonemization (separate from Kokoro's internal one).
+      // We phonemize first, then pass phonemes to createTTS with isPhonemes: true,
+      // matching the proven pattern from the package's integration tests.
+      final tokenizer = Tokenizer();
+      await tokenizer.ensureInitialized();
+
       for (int i = 0; i < sentences.length; i++) {
         final sentence = sentences[i];
         if (sentence.trim().isEmpty) continue;
 
-        _log('Synthesizing sentence ${i + 1}/${sentences.length} (${sentence.length} chars)');
+        _log('Phonemizing sentence ${i + 1}/${sentences.length}...');
+        final phonemes = await tokenizer.phonemize(sentence, lang: 'en-us');
+        if (phonemes.isEmpty) {
+          _log('Empty phonemes for sentence $i', level: 'WARN');
+          continue;
+        }
+        _log('Phonemes (${phonemes.length} chars)');
+
         final result = await _kokoro!.createTTS(
-          text: sentence,
+          text: phonemes,
           voice: voice,
-          isPhonemes: false,
+          isPhonemes: true,
           lang: 'en-us',
         );
         _log('Sentence ${i + 1} audio: ${result.audio.length} samples');

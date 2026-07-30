@@ -36,6 +36,8 @@ class ModelController extends GetxController {
     final lastId = _storage.lastModelId;
     if (lastId.isNotEmpty) {
       selectedModelFilename.value = lastId;
+      // Auto-load the last used model on startup (persistent across restarts)
+      _autoLoadLastModel(lastId);
     }
 
     // Listen to LLM service loading state for progress
@@ -47,6 +49,27 @@ class ModelController extends GetxController {
         loadingStatusMsg.value = msg;
       }
     });
+  }
+
+  /// Silently load the last used model on startup without showing UI.
+  Future<void> _autoLoadLastModel(String filename) async {
+    try {
+      final path = _manager.getModelPathByFilename(filename);
+      final file = File(path);
+      if (!await file.exists()) return;
+
+      loadingModelFilename.value = filename;
+      isLoadingModel.value = true;
+      await _llm.loadModel(path);
+      if (_llm.isLoaded.value) {
+        _storage.lastModelId = filename;
+      }
+    } catch (_) {
+      // Silently fail — user can manually load if needed
+    } finally {
+      isLoadingModel.value = false;
+      loadingModelFilename.value = null;
+    }
   }
 
   /// Is a specific model currently downloading?

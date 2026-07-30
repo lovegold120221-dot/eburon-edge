@@ -28,6 +28,7 @@ class AppColors {
   static const green  = Color(0xFF3FB950);
   static const red    = Color(0xFFF85149);
   static const orange = Color(0xFFE3B341);
+  static const pluto  = Color(0xFFB07D62); // Warm reddish-brown like Pluto's surface
 
   // ── Dark Theme Colors ──────────────────────────────────────────
   static const darkBg        = Color(0xFF0D1117); // Dark gray

@@ -520,7 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           color: isLoading
                               ? AppColors.orange
                               : loaded
-                              ? AppColors.green
+                              ? AppColors.pluto
                               : AppColors.red,
                         ),
                       ),
@@ -858,7 +858,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: _llm.isLoadingModel.value
                         ? AppColors.orange
                         : _llm.isLoaded.value
-                        ? AppColors.green
+                        ? AppColors.pluto
                         : AppColors.red,
                   ),
                 ),

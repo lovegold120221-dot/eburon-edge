@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../models/tts_model_info.dart';
 import '../chat_storage_service.dart';
+import '../log_service.dart';
 import '../model_manager.dart';
 
 enum TtsState { uninitialized, ready, speaking, error }
@@ -218,37 +219,93 @@ class KokoroTtsService extends GetxService {
   }
 
   Future<bool> speak(String text) async {
-    if (!ttsEnabled.value || text.isEmpty) return false;
+    if (!ttsEnabled.value || text.isEmpty) {
+      _log('TTS disabled or empty text', level: 'WARN');
+      return false;
+    }
     if (state.value != TtsState.ready) {
-      if (kDebugMode) debugPrint('KokoroTts: Model not loaded');
+      _log('TTS model not loaded, state=${state.value}', level: 'WARN');
       return false;
     }
     final voice = _selectedVoiceId ?? TtsCatalog.defaultVoice.id;
-    try {
-      isSpeaking.value = true;
-      _currentText = text;
+    _log('Speaking: "${text.substring(0, text.length.clamp(0, 80))}..." voice=$voice');
 
-      final result = await _kokoro!.createTTS(
-        text: text,
-        voice: voice,
-        isPhonemes: false,
-        lang: 'en-us',
-      );
-      if (result.audio.isNotEmpty) {
-        final audio = Float32List.fromList(
-          result.audio.map((e) => e.toDouble()).toList(),
+    // Split long text into sentences to stay within the tokenizer's 510-phoneme limit.
+    // Each sentence is synthesized separately and played sequentially.
+    final sentences = _splitSentences(text);
+    if (sentences.length > 1) {
+      _log('Split into ${sentences.length} sentences');
+    }
+
+    isSpeaking.value = true;
+    _currentText = text;
+
+    try {
+      for (int i = 0; i < sentences.length; i++) {
+        final sentence = sentences[i];
+        if (sentence.trim().isEmpty) continue;
+
+        _log('Synthesizing sentence ${i + 1}/${sentences.length} (${sentence.length} chars)');
+        final result = await _kokoro!.createTTS(
+          text: sentence,
+          voice: voice,
+          isPhonemes: false,
+          lang: 'en-us',
         );
-        await _playAudio(audio, result.sampleRate);
+        _log('Sentence ${i + 1} audio: ${result.audio.length} samples');
+
+        if (result.audio.isNotEmpty) {
+          final audio = Float32List.fromList(
+            result.audio.map((e) => e.toDouble()).toList(),
+          );
+          await _playAudio(audio, result.sampleRate);
+        }
       }
       isSpeaking.value = false;
       _currentText = null;
       return true;
     } catch (e) {
-      if (kDebugMode) debugPrint('KokoroTts: speak error: $e');
+      _log('TTS speak error: $e', level: 'ERROR');
       isSpeaking.value = false;
       _currentText = null;
       return false;
     }
+  }
+
+  /// Split text into sentences for incremental TTS synthesis.
+  /// Each sentence is at most ~300 chars to stay well under the 510-phoneme limit.
+  List<String> _splitSentences(String text) {
+    if (text.length <= 300) return [text];
+
+    final result = <String>[];
+    final buffer = StringBuffer();
+    for (int i = 0; i < text.length; i++) {
+      buffer.write(text[i]);
+      // Split at sentence boundaries (period, exclamation, question mark + space/end)
+      if ((text[i] == '.' || text[i] == '!' || text[i] == '?') &&
+          (i + 1 >= text.length || text[i + 1] == ' ')) {
+        final chunk = buffer.toString().trim();
+        if (chunk.isNotEmpty) {
+          result.add(chunk);
+          buffer.clear();
+        }
+      }
+      // Hard split at 300 chars if no sentence boundary found
+      if (buffer.length >= 300) {
+        final chunk = buffer.toString().trim();
+        if (chunk.isNotEmpty) {
+          result.add(chunk);
+          buffer.clear();
+        }
+      }
+    }
+    // Add remaining text
+    final remaining = buffer.toString().trim();
+    if (remaining.isNotEmpty) {
+      result.add(remaining);
+    }
+
+    return result.isEmpty ? [text] : result;
   }
 
   Future<void> _playAudio(Float32List audio, int sampleRate) async {
@@ -256,7 +313,10 @@ class KokoroTtsService extends GetxService {
 
     await _disposePlayer();
 
+    // Encode audio to WAV
     final wavBytes = _encodeWav(audio, sampleRate);
+    _log('WAV encoded: ${wavBytes.length} bytes, ${audio.length} samples @ ${sampleRate}Hz');
+
     final tempDir = await getTemporaryDirectory();
     final tempFile = File(
       p.join(tempDir.path, 'kokoro_tts_${_randomString()}.wav'),
@@ -268,31 +328,48 @@ class KokoroTtsService extends GetxService {
       final completer = Completer<void>();
 
       _playerStateSub = _audioPlayer!.onPlayerComplete.listen((_) {
+        _log('Audio playback completed');
         if (!completer.isCompleted) completer.complete();
       });
 
-      // Fallback timeout in case playback never completes
-      final estimatedMs = (audio.length / sampleRate * 1000).round() + 2000;
+      // Fallback timeout: duration + 3s safety margin
+      final durationMs = (audio.length / sampleRate * 1000).round();
+      final timeoutMs = durationMs + 3000;
+      _log('Playing audio (est ${durationMs}ms, timeout ${timeoutMs}ms)');
       Timer(
-        estimatedMs > 0
-            ? Duration(milliseconds: estimatedMs)
-            : const Duration(seconds: 5),
+        Duration(milliseconds: timeoutMs),
         () {
-          if (!completer.isCompleted) completer.complete();
+          if (!completer.isCompleted) {
+            _log('Audio playback timeout fired', level: 'WARN');
+            completer.complete();
+          }
         },
       );
 
       await _audioPlayer!.play(DeviceFileSource(tempFile.path));
       await completer.future;
 
+      // Clean up temp file
       try {
         if (await tempFile.exists()) await tempFile.delete();
       } catch (_) {}
     } catch (e) {
-      if (kDebugMode) debugPrint('KokoroTts: Audio playback error: $e');
+      _log('Audio playback error: $e', level: 'ERROR');
     } finally {
       await _disposePlayer();
     }
+  }
+
+  void _log(String msg, {String level = 'INFO'}) {
+    debugPrint('KokoroTts: $msg');
+    try {
+      final log = Get.find<LogService>();
+      switch (level) {
+        case 'ERROR': log.error(msg, source: 'TTS'); break;
+        case 'WARN': log.warn(msg, source: 'TTS'); break;
+        default: log.info(msg, source: 'TTS');
+      }
+    } catch (_) {}
   }
 
   Future<void> _disposePlayer() async {

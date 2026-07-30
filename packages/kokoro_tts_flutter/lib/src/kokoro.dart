@@ -230,14 +230,47 @@ class Kokoro {
     return 'neutral';
   }
 
-  /// Splits phonemes into batches to process in chunks
+  /// Splits phonemes into batches to process in chunks.
+  /// Each batch must be under [maxPhonemeLength] (510) characters
+  /// to stay within the tokenizer's limit.
   List<String> _splitPhonemes(String phonemes) {
-    // For testing purposes, and to simplify the current debugging path,
-    // always return the phoneme string as a single batch.
-    // This ensures that the tokenization step receives the exact phoneme string
-    // with punctuation intact, as provided to createTTS.
-    // TODO: Revisit proper batching logic for very long phoneme strings if necessary.
-    return [phonemes];
+    if (phonemes.length <= maxPhonemeLength) {
+      return [phonemes];
+    }
+
+    // Split on sentence boundaries (period, exclamation, question mark)
+    // to keep phoneme chunks natural and under the limit.
+    final batches = <String>[];
+    final buffer = StringBuffer();
+    for (int i = 0; i < phonemes.length; i++) {
+      buffer.write(phonemes[i]);
+      // Check for sentence-ending punctuation followed by space or end
+      if ((phonemes[i] == '.' || phonemes[i] == '!' || phonemes[i] == '?') &&
+          (i + 1 >= phonemes.length || phonemes[i + 1] == ' ')) {
+        final chunk = buffer.toString();
+        if (chunk.length >= maxPhonemeLength - 20) {
+          batches.add(chunk);
+          buffer.clear();
+        }
+      }
+    }
+    // Add remaining text
+    if (buffer.isNotEmpty) {
+      batches.add(buffer.toString());
+    }
+
+    // If splitting by sentences didn't help, hard-split at the limit
+    if (batches.length == 1 && batches.first.length > maxPhonemeLength) {
+      final hardSplit = <String>[];
+      final single = batches.first;
+      for (int i = 0; i < single.length; i += maxPhonemeLength - 10) {
+        hardSplit.add(single.substring(
+            i, (i + maxPhonemeLength - 10).clamp(0, single.length)));
+      }
+      return hardSplit;
+    }
+
+    return batches;
   }
 
   /// Creates audio from the provided text using the specified voice and settings

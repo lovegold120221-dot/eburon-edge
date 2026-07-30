@@ -38,7 +38,12 @@ class KokoroTtsService extends GetxService {
   bool _modelDownloadCancelled = false;
 
   /// The expected ONNX model filename once downloaded.
-  static const _modelFilename = 'kokoro-82m.onnx';
+  static const _modelFilename = 'kokoro-v1.0.onnx';
+
+   /// Exact user-specified URL for the Kokoro-82M ONNX model.
+  static const _modelUrl =
+       'https://github.com/thewh1teagle/kokoro-onnx/releases/'
+       'download/model-files-v1.0/kokoro-v1.0.onnx';
 
   String? get selectedVoiceId => _selectedVoiceId;
   List<TtsVoiceInfo> get availableVoices => TtsCatalog.voices;
@@ -64,19 +69,46 @@ class KokoroTtsService extends GetxService {
   }
 
   Future<void> _tryAutoLoad() async {
-    try {
-      final modelPath = await _findOnnxModelPath();
-      if (modelPath == null) {
-        debugPrint('KokoroTts: No ONNX model found, TTS unavailable');
-        return;
-      }
-      debugPrint('KokoroTts: Auto-loading model from $modelPath');
-      await loadModel(modelPath);
-    } catch (e) {
-      if (kDebugMode) debugPrint('KokoroTts: Auto-load skipped: $e');
-    }
-  }
-
+   try {
+     final modelPath = await _findOnnxModelPath();
+     if (modelPath != null) {
+       debugPrint('KokoroTts: Found existing model at $modelPath');
+       await loadModel(modelPath);
+       return;
+     }
+     // Model not found — download it
+     debugPrint('KokoroTts: No ONNX model found, downloading...');
+     state.value = TtsState.uninitialized;
+     final destPath = p.join(await _getTtsDir(), _modelFilename);
+     final maxRetries = 3;
+     int attempt = 0;
+     while (attempt < maxRetries) {
+       attempt++;
+       try {
+         await downloadModel(
+           url: _modelUrl,
+           destPath: destPath,
+           totalBytes: 310_000_000,
+         );
+         break;
+       } catch (e) {
+         if (kDebugMode) debugPrint('KokoroTts: Download attempt $attempt failed: $e');
+         if (attempt < maxRetries) await Future.delayed(Duration(seconds: pow(2, attempt).toInt()));
+       }
+     }
+     final loadedPath = await _findOnnxModelPath();
+     if (loadedPath != null) {
+       await loadModel(loadedPath);
+     } else {
+       state.value = TtsState.error;
+       if (kDebugMode) debugPrint('KokoroTts: Model download failed after retries');
+     }
+   }
+    catch (e) {
+     state.value = TtsState.error;
+     if (kDebugMode) debugPrint('KokoroTts: Auto-load failed: $e');
+   }
+   }
   /// Look for a previously downloaded ONNX model in the TTS directory.
   Future<String?> _findOnnxModelPath() async {
     final dir = await _getTtsDir();

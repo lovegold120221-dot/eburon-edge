@@ -39,19 +39,27 @@ class LuxTtsService extends GetxService {
   final overallProgress = 0.0.obs;
   final currentFile = ''.obs;
 
-  /// Tracks which files are downloaded on disk.
+   /// Tracks which files are downloaded on disk.
   final downloadedFiles = <String>[].obs;
 
-  /// Tracks active file downloads.
+   /// Tracks active file downloads.
   final fileDownloads = <String, LuxFileDownload>{}.obs;
 
   String? _modelsDir;
   bool _allFilesCancelled = false;
 
+   /// Whether LuxTTS models are available (bucket has been removed from HuggingFace).
+  static const bool kIsAvailable = false;
+
   @override
   void onInit() {
     super.onInit();
-    _refreshStatus();
+    if (kIsAvailable) {
+      _refreshStatus();
+    } else {
+       // Mark as error — bucket unavailable
+      state.value = LuxTtsState.error;
+    }
   }
 
   Future<String> _getLuxDir() async {
@@ -69,7 +77,7 @@ class LuxTtsService extends GetxService {
     }
   }
 
-  /// Scan the LuxTTS directory for downloaded files.
+   /// Scan the LuxTTS directory for downloaded files.
   Future<void> _refreshStatus() async {
     final dir = await _getLuxDir();
     if (!await Directory(dir).exists()) {
@@ -84,24 +92,29 @@ class LuxTtsService extends GetxService {
     downloadedFiles.value = files;
   }
 
-  /// Check if all required LuxTTS files are downloaded.
+   /// Check if all required LuxTTS files are downloaded.
   Future<bool> isComplete() async {
     await _refreshStatus();
     final required = TtsCatalog.luxTts.files
-        .where((f) => !f.id.contains('int8')) // skip int8 variants
+        .where((f) => !f.id.contains('int8'))
         .map((f) => f.filename)
         .toSet();
     return required.every((f) => downloadedFiles.contains(f));
   }
 
-  /// Download all LuxTTS model files with progress.
+   /// Download all LuxTTS model files with progress.
   Future<void> downloadAll() async {
+    if (!kIsAvailable) {
+      throw Exception(
+          'LuxTTS models are currently unavailable. '
+          'The HuggingFace bucket has been removed.');
+    }
+
     _allFilesCancelled = false;
     state.value = LuxTtsState.downloading;
     overallProgress.value = 0.0;
 
     final model = TtsCatalog.luxTts;
-    // Only download the non-int8 files (full precision)
     final filesToDl = model.files
         .where((f) => !f.id.contains('int8'))
         .toList();
@@ -115,7 +128,7 @@ class LuxTtsService extends GetxService {
       currentFile.value = file.name;
       final destPath = p.join(await _getLuxDir(), file.filename);
 
-      // Skip if already downloaded
+        // Skip if already downloaded
       if (downloadedFiles.contains(file.filename)) {
         accumulatedBytes += file.sizeMb * 1024 * 1024;
         overallProgress.value =
@@ -130,22 +143,31 @@ class LuxTtsService extends GetxService {
       );
       fileDownloads[file.id] = dlState;
 
+      http.Client? client;
       try {
-        final client = Get.find<http.Client>();
-        final request = http.Request('GET', Uri.parse(file.url));
-        // HuggingFace requires a User-Agent header for direct file downloads
+        client = http.Client();
+        final request = http.Request('GET', Uri.parse(file.filename));
         request.headers['User-Agent'] = 'EburonEdge/1.0';
+
         final response = await client.send(request);
-        if (response.statusCode != 200) {
-          // HuggingFace may return 302 redirects; http.Client follows them,
-          // but if we get non-200, check content-type for HTML (error page)
+
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          client.close();
+          throw Exception(
+              'Download failed (HTTP ${response.statusCode}): '
+              'HuggingFace requires authentication.');
+        } else if (response.statusCode == 404) {
+          client.close();
+          throw Exception(
+              'Download failed (HTTP 404): '
+              'File not found. The model bucket may have been removed.');
+        } else if (response.statusCode != 200) {
           final contentType = response.headers['content-type'] ?? '';
+          client.close();
           if (contentType.contains('text/html')) {
             throw Exception(
-              'Download failed (HTTP ${response.statusCode}): '
-              'HuggingFace returned an HTML page instead of the file. '
-              'The file may not exist or the URL may be incorrect.',
-            );
+                'Download failed (HTTP ${response.statusCode}): '
+                'Server returned an error page instead of the file.');
           }
           throw Exception('Download failed: HTTP ${response.statusCode}');
         }
@@ -174,7 +196,6 @@ class LuxTtsService extends GetxService {
             fileDownloads.refresh();
           }
 
-          // Update overall progress
           accumulatedBytes = fileDownloads.values.fold<double>(
             0,
             (s, d) => s + d.receivedBytes,
@@ -200,6 +221,7 @@ class LuxTtsService extends GetxService {
         if (await f.exists()) await f.delete();
         rethrow;
       } finally {
+        client?.close();
         fileDownloads.remove(file.id);
       }
 
@@ -216,7 +238,7 @@ class LuxTtsService extends GetxService {
     }
   }
 
-  /// Cancel all in-progress downloads.
+   /// Cancel all in-progress downloads.
   void cancelAll() {
     _allFilesCancelled = true;
     for (final entry in fileDownloads.entries) {
@@ -228,17 +250,17 @@ class LuxTtsService extends GetxService {
     overallProgress.value = 0.0;
   }
 
-  /// Delete all downloaded LuxTTS files.
+   /// Delete all downloaded LuxTTS files.
   Future<void> deleteAll() async {
     final dir = await _getLuxDir();
     if (await Directory(dir).exists()) {
       await Directory(dir).delete(recursive: true);
     }
     downloadedFiles.value = [];
-    state.value = LuxTtsState.uninitialized;
+    state.value = kIsAvailable ? LuxTtsState.uninitialized : LuxTtsState.error;
   }
 
-  /// Get path to a specific downloaded file.
+   /// Get path to a specific downloaded file.
   Future<String?> getFilePath(String fileId) async {
     final dir = await _getLuxDir();
     final path = p.join(dir, fileId);
@@ -246,14 +268,14 @@ class LuxTtsService extends GetxService {
     return null;
   }
 
-  /// Check if a specific file is downloaded.
+   /// Check if a specific file is downloaded.
   Future<bool> hasFile(String fileId) async {
     if (downloadedFiles.contains(fileId)) return true;
     final dir = await _getLuxDir();
     return await File(p.join(dir, fileId)).exists();
   }
 
-  /// Get total download size in MB for display.
+   /// Get total download size in MB for display.
   double get totalSizeMb => TtsCatalog.luxTts.totalSizeMb;
 
   @override

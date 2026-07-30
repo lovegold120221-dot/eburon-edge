@@ -1,8 +1,7 @@
-/// Represents a TTS voice embedding file that can be downloaded.
+/// Represents a TTS voice embedding — stored in bundled assets, not downloaded.
 class TtsVoiceInfo {
   final String id; // e.g. "af_heart"
-  final String name; // e.g. "Heart (American Female)"
-  final String url; // full download URL
+  final String name; // e.g. "Heart"
   final double sizeMb; // file size in MB
   final String language; // "en-US", "ja-JP", etc.
   final String gender; // "female", "male"
@@ -11,45 +10,38 @@ class TtsVoiceInfo {
   const TtsVoiceInfo({
     required this.id,
     required this.name,
-    required this.url,
     this.sizeMb = 0.522,
     this.language = 'en-US',
     this.gender = 'female',
     this.accent,
-  });
-
-  String get filename => '$id.bin';
+   });
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'url': url,
-    'sizeMb': sizeMb,
-    'language': language,
-    'gender': gender,
-    'accent': accent,
-  };
+     'id': id,
+     'name': name,
+     'sizeMb': sizeMb,
+     'language': language,
+     'gender': gender,
+     'accent': accent,
+    };
 
   factory TtsVoiceInfo.fromJson(Map<String, dynamic> json) => TtsVoiceInfo(
     id: json['id'] as String,
     name: json['name'] as String,
-    url: json['url'] as String,
     sizeMb: (json['sizeMb'] as num?)?.toDouble() ?? 0.522,
     language: (json['language'] as String?) ?? 'en-US',
     gender: (json['gender'] as String?) ?? 'female',
     accent: json['accent'] as String?,
-  );
+    );
 }
 
-/// Represents a TTS model that can be downloaded and used for inference.
+/// Represents a Kokoro-82M ONNX model that can be downloaded.
 class TtsModelInfo {
   final String id; // "kokoro-82m"
   final String name; // "Kokoro 82M"
   final String description;
   final String modelUrl; // URL to the ONNX model file
   final double sizeMb; // model file size in MB
-  final String? tokenizerUrl; // URL to tokenizer.json
-  final String? configUrl; // URL to config.json
 
   const TtsModelInfo({
     required this.id,
@@ -57,56 +49,29 @@ class TtsModelInfo {
     required this.description,
     required this.modelUrl,
     required this.sizeMb,
-    this.tokenizerUrl,
-    this.configUrl,
-  });
-
-  String get filename => '$id.onnx';
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'description': description,
-    'modelUrl': modelUrl,
-    'sizeMb': sizeMb,
-    'tokenizerUrl': tokenizerUrl,
-    'configUrl': configUrl,
-  };
-
-  factory TtsModelInfo.fromJson(Map<String, dynamic> json) => TtsModelInfo(
-    id: json['id'] as String,
-    name: json['name'] as String,
-    description: (json['description'] as String?) ?? '',
-    modelUrl: json['modelUrl'] as String,
-    sizeMb: (json['sizeMb'] as num).toDouble(),
-    tokenizerUrl: json['tokenizerUrl'] as String?,
-    configUrl: json['configUrl'] as String?,
-  );
+    });
 }
 
-/// Represents a LuxTTS model component file for download tracking.
+/// LuxTTS model component file — currently unavailable (HuggingFace bucket removed).
 class LuxTtsFileInfo {
   final String id;
   final String name;
-  final String url;
   final double sizeMb;
 
   const LuxTtsFileInfo({
     required this.id,
     required this.name,
-    required this.url,
     required this.sizeMb,
-  });
+    });
 
   String get filename => id;
 }
 
-/// LuxTTS model info — a multi-file ZipVoice-based TTS model.
+/// LuxTTS model info — multi-file TTS model.
 class LuxTtsModelInfo {
   final String id;
   final String name;
   final String description;
-  final String baseUrl;
   final List<LuxTtsFileInfo> files;
   final double totalSizeMb;
 
@@ -114,462 +79,127 @@ class LuxTtsModelInfo {
     required this.id,
     required this.name,
     required this.description,
-    required this.baseUrl,
     required this.files,
     required this.totalSizeMb,
-  });
+    });
 }
 
-/// Built-in TTS model catalog — Kokoro-82M ONNX
+/// Built-in TTS model catalog — Kokoro-82M ONNX + LuxTTS (placeholder).
 class TtsCatalog {
   static const String _baseUrl =
-      'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0';
+       'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0';
 
-  /// Default Kokoro-82M ONNX model (82 MB).
+   /// Default Kokoro-82M ONNX model.
   static const TtsModelInfo defaultModel = TtsModelInfo(
     id: 'kokoro-82m',
     name: 'Kokoro 82M',
     description:
-        'High-quality, lightweight TTS model. 82M parameters, Apache 2.0 license. '
-        'Generates natural speech at 24kHz with real-time ONNX Runtime inference. '
-        'Download the model + a voice file to start.',
+         'High-quality, lightweight TTS model. 82M parameters, Apache 2.0 license. '
+         'Generates natural speech at 24kHz with real-time ONNX Runtime inference.',
     modelUrl: '$_baseUrl/kokoro-v1.0.onnx',
-    sizeMb: 82.0,
-  );
+    sizeMb: 310.0,
+    );
 
-  /// All available voices from the Kokoro-82M ONNX repository
+   /// All available voices — bundled in assets/voices.json, not downloaded individually.
+   /// The Kokoro package reads these directly from the Flutter asset bundle.
   static const List<TtsVoiceInfo> voices = [
-    // ── American English Female ──
-    TtsVoiceInfo(
-      id: 'af_heart',
-      name: 'Heart',
-      url: '$_baseUrl/voices/af_heart.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_alloy',
-      name: 'Alloy',
-      url: '$_baseUrl/voices/af_alloy.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_aoede',
-      name: 'Aoede',
-      url: '$_baseUrl/voices/af_aoede.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_bella',
-      name: 'Bella',
-      url: '$_baseUrl/voices/af_bella.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_jessica',
-      name: 'Jessica',
-      url: '$_baseUrl/voices/af_jessica.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_kore',
-      name: 'Kore',
-      url: '$_baseUrl/voices/af_kore.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_nicole',
-      name: 'Nicole',
-      url: '$_baseUrl/voices/af_nicole.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_nova',
-      name: 'Nova',
-      url: '$_baseUrl/voices/af_nova.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_river',
-      name: 'River',
-      url: '$_baseUrl/voices/af_river.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_sarah',
-      name: 'Sarah',
-      url: '$_baseUrl/voices/af_sarah.bin',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'af_sky',
-      name: 'Sky',
-      url: '$_baseUrl/voices/af_sky.bin',
-      accent: 'American',
-    ),
+     // ── American English Female ──
+    TtsVoiceInfo(id: 'af_alloy', name: 'Alloy', accent: 'American'),
+    TtsVoiceInfo(id: 'af_aoede', name: 'Aoede', accent: 'American'),
+    TtsVoiceInfo(id: 'af_bella', name: 'Bella', accent: 'American'),
+    TtsVoiceInfo(id: 'af_heart', name: 'Heart', accent: 'American'),
+    TtsVoiceInfo(id: 'af_jessica', name: 'Jessica', accent: 'American'),
+    TtsVoiceInfo(id: 'af_kore', name: 'Kore', accent: 'American'),
+    TtsVoiceInfo(id: 'af_nicole', name: 'Nicole', accent: 'American'),
+    TtsVoiceInfo(id: 'af_nova', name: 'Nova', accent: 'American'),
+    TtsVoiceInfo(id: 'af_river', name: 'River', accent: 'American'),
+    TtsVoiceInfo(id: 'af_sarah', name: 'Sarah', accent: 'American'),
+    TtsVoiceInfo(id: 'af_sky', name: 'Sky', accent: 'American'),
+     // ── American English Male ──
+    TtsVoiceInfo(id: 'am_adam', name: 'Adam', gender: 'male', accent: 'American'),
+    TtsVoiceInfo(id: 'am_echo', name: 'Echo', gender: 'male', accent: 'American'),
+    TtsVoiceInfo(id: 'am_floyd', name: 'Floyd', gender: 'male', accent: 'American'),
+    TtsVoiceInfo(id: 'am_michael', name: 'Michael', gender: 'male', accent: 'American'),
+    TtsVoiceInfo(id: 'am_reed', name: 'Reed', gender: 'male', accent: 'American'),
+     // ── British English Female ──
+    TtsVoiceInfo(id: 'bf_emma', name: 'Emma', accent: 'British'),
+    TtsVoiceInfo(id: 'bf_isabella', name: 'Isabella', accent: 'British'),
+    TtsVoiceInfo(id: 'bf_lily', name: 'Lily', accent: 'British'),
+     // ── British English Male ──
+    TtsVoiceInfo(id: 'bm_jorge', name: 'Jorge', gender: 'male', accent: 'British'),
+    TtsVoiceInfo(id: 'bm_lewis', name: 'Lewis', gender: 'male', accent: 'British'),
+    TtsVoiceInfo(id: 'bm_thomas', name: 'Thomas', gender: 'male', accent: 'British'),
+     // ── Spanish Female ──
+    TtsVoiceInfo(id: 'sf_dora', name: 'Dora', accent: 'Spanish'),
+    TtsVoiceInfo(id: 'sf_emilia', name: 'Emilia', accent: 'Spanish'),
+     // ── Italian Female ──
+    TtsVoiceInfo(id: 'if_sara', name: 'Sara', language: 'it-IT', accent: 'Italian'),
+     // ── Italian Male ──
+    TtsVoiceInfo(id: 'im_nicola', name: 'Nicola', gender: 'male', language: 'it-IT', accent: 'Italian'),
+     // ── Portuguese Female ──
+    TtsVoiceInfo(id: 'pf_dora', name: 'Dora', language: 'pt-PT', accent: 'Portuguese'),
+     // ── Portuguese Male ──
+    TtsVoiceInfo(id: 'pm_alex', name: 'Alex', gender: 'male', language: 'pt-PT', accent: 'Portuguese'),
+    TtsVoiceInfo(id: 'pm_santa', name: 'Santa', gender: 'male', language: 'pt-PT', accent: 'Portuguese'),
+     // ── Japanese Female ──
+    TtsVoiceInfo(id: 'jf_alpha', name: 'Alpha (Japanese)', language: 'ja-JP', accent: 'Japanese'),
+    TtsVoiceInfo(id: 'jf_jenny', name: 'Jenny (Japanese)', language: 'ja-JP', accent: 'Japanese'),
+    TtsVoiceInfo(id: 'jf_nikki', name: 'Nikki (Japanese)', language: 'ja-JP', accent: 'Japanese'),
+    TtsVoiceInfo(id: 'jf_tebukuro', name: 'Tebukuro (Japanese)', language: 'ja-JP', accent: 'Japanese'),
+     // ── Japanese Male ──
+    TtsVoiceInfo(id: 'jm_kumo', name: 'Kumo (Japanese)', gender: 'male', language: 'ja-JP', accent: 'Japanese'),
+     // ── Chinese Female ──
+    TtsVoiceInfo(id: 'zf_xiaobei', name: 'Xiaobei', language: 'zh-CN', accent: 'Chinese'),
+    TtsVoiceInfo(id: 'zf_xiaoxiao', name: 'Xiaoxiao', language: 'zh-CN', accent: 'Chinese'),
+    TtsVoiceInfo(id: 'zf_xiaoni', name: 'Xiaoni', language: 'zh-CN', accent: 'Chinese'),
+   ];
 
-    // ── American English Male ──
-    TtsVoiceInfo(
-      id: 'am_adam',
-      name: 'Adam',
-      url: '$_baseUrl/voices/am_adam.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_echo',
-      name: 'Echo',
-      url: '$_baseUrl/voices/am_echo.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_eric',
-      name: 'Eric',
-      url: '$_baseUrl/voices/am_eric.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_fenrir',
-      name: 'Fenrir',
-      url: '$_baseUrl/voices/am_fenrir.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_liam',
-      name: 'Liam',
-      url: '$_baseUrl/voices/am_liam.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_michael',
-      name: 'Michael',
-      url: '$_baseUrl/voices/am_michael.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_onyx',
-      name: 'Onyx',
-      url: '$_baseUrl/voices/am_onyx.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_puck',
-      name: 'Puck',
-      url: '$_baseUrl/voices/am_puck.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-    TtsVoiceInfo(
-      id: 'am_santa',
-      name: 'Santa',
-      url: '$_baseUrl/voices/am_santa.bin',
-      gender: 'male',
-      accent: 'American',
-    ),
-
-    // ── British English Female ──
-    TtsVoiceInfo(
-      id: 'bf_alice',
-      name: 'Alice',
-      url: '$_baseUrl/voices/bf_alice.bin',
-      accent: 'British',
-    ),
-    TtsVoiceInfo(
-      id: 'bf_emma',
-      name: 'Emma',
-      url: '$_baseUrl/voices/bf_emma.bin',
-      accent: 'British',
-    ),
-    TtsVoiceInfo(
-      id: 'bf_isabella',
-      name: 'Isabella',
-      url: '$_baseUrl/voices/bf_isabella.bin',
-      accent: 'British',
-    ),
-    TtsVoiceInfo(
-      id: 'bf_lily',
-      name: 'Lily',
-      url: '$_baseUrl/voices/bf_lily.bin',
-      accent: 'British',
-    ),
-
-    // ── British English Male ──
-    TtsVoiceInfo(
-      id: 'bm_daniel',
-      name: 'Daniel',
-      url: '$_baseUrl/voices/bm_daniel.bin',
-      gender: 'male',
-      accent: 'British',
-    ),
-    TtsVoiceInfo(
-      id: 'bm_fable',
-      name: 'Fable',
-      url: '$_baseUrl/voices/bm_fable.bin',
-      gender: 'male',
-      accent: 'British',
-    ),
-    TtsVoiceInfo(
-      id: 'bm_george',
-      name: 'George',
-      url: '$_baseUrl/voices/bm_george.bin',
-      gender: 'male',
-      accent: 'British',
-    ),
-    TtsVoiceInfo(
-      id: 'bm_lewis',
-      name: 'Lewis',
-      url: '$_baseUrl/voices/bm_lewis.bin',
-      gender: 'male',
-      accent: 'British',
-    ),
-
-    // ── European Female ──
-    TtsVoiceInfo(
-      id: 'ef_dora',
-      name: 'Dora (Spanish)',
-      url: '$_baseUrl/voices/ef_dora.bin',
-      accent: 'Spanish',
-    ),
-    TtsVoiceInfo(
-      id: 'em_alex',
-      name: 'Alex (Romanian)',
-      url: '$_baseUrl/voices/em_alex.bin',
-      gender: 'male',
-      accent: 'Romanian',
-    ),
-    TtsVoiceInfo(
-      id: 'em_santa',
-      name: 'Santa (Turkish)',
-      url: '$_baseUrl/voices/em_santa.bin',
-      gender: 'male',
-      accent: 'Turkish',
-    ),
-
-    // ── French ──
-    TtsVoiceInfo(
-      id: 'ff_siwis',
-      name: 'Siwis (French)',
-      url: '$_baseUrl/voices/ff_siwis.bin',
-      language: 'fr-FR',
-      accent: 'French',
-    ),
-
-    // ── Japanese ──
-    TtsVoiceInfo(
-      id: 'jf_alpha',
-      name: 'Alpha (Japanese)',
-      url: '$_baseUrl/voices/jf_alpha.bin',
-      language: 'ja-JP',
-      accent: 'Japanese',
-    ),
-    TtsVoiceInfo(
-      id: 'jf_gongitsune',
-      name: 'Gongitsune (Japanese)',
-      url: '$_baseUrl/voices/jf_gongitsune.bin',
-      language: 'ja-JP',
-      accent: 'Japanese',
-    ),
-    TtsVoiceInfo(
-      id: 'jf_nezumi',
-      name: 'Nezumi (Japanese)',
-      url: '$_baseUrl/voices/jf_nezumi.bin',
-      language: 'ja-JP',
-      accent: 'Japanese',
-    ),
-    TtsVoiceInfo(
-      id: 'jf_tebukuro',
-      name: 'Tebukuro (Japanese)',
-      url: '$_baseUrl/voices/jf_tebukuro.bin',
-      language: 'ja-JP',
-      accent: 'Japanese',
-    ),
-    TtsVoiceInfo(
-      id: 'jm_kumo',
-      name: 'Kumo (Japanese)',
-      url: '$_baseUrl/voices/jm_kumo.bin',
-      language: 'ja-JP',
-      gender: 'male',
-      accent: 'Japanese',
-    ),
-
-    // ── Chinese ──
-    TtsVoiceInfo(
-      id: 'zf_xiaobei',
-      name: 'Xiaobei (Chinese)',
-      url: '$_baseUrl/voices/zf_xiaobei.bin',
-      language: 'zh-CN',
-      accent: 'Chinese',
-    ),
-    TtsVoiceInfo(
-      id: 'zf_xiaoni',
-      name: 'Xiaoni (Chinese)',
-      url: '$_baseUrl/voices/zf_xiaoni.bin',
-      language: 'zh-CN',
-      accent: 'Chinese',
-    ),
-    TtsVoiceInfo(
-      id: 'zf_xiaoxiao',
-      name: 'Xiaoxiao (Chinese)',
-      url: '$_baseUrl/voices/zf_xiaoxiao.bin',
-      language: 'zh-CN',
-      accent: 'Chinese',
-    ),
-
-    // ── Miscellaneous ──
-    TtsVoiceInfo(
-      id: 'hf_alpha',
-      name: 'Alpha (HF)',
-      url: '$_baseUrl/voices/hf_alpha.bin',
-    ),
-    TtsVoiceInfo(
-      id: 'hf_beta',
-      name: 'Beta (HF)',
-      url: '$_baseUrl/voices/hf_beta.bin',
-    ),
-    TtsVoiceInfo(
-      id: 'hm_omega',
-      name: 'Omega (HF)',
-      url: '$_baseUrl/voices/hm_omega.bin',
-      gender: 'male',
-    ),
-    TtsVoiceInfo(
-      id: 'hm_psi',
-      name: 'Psi (HF)',
-      url: '$_baseUrl/voices/hm_psi.bin',
-      gender: 'male',
-    ),
-    TtsVoiceInfo(
-      id: 'if_sara',
-      name: 'Sara (Italian)',
-      url: '$_baseUrl/voices/if_sara.bin',
-      language: 'it-IT',
-      accent: 'Italian',
-    ),
-    TtsVoiceInfo(
-      id: 'im_nicola',
-      name: 'Nicola (Italian)',
-      url: '$_baseUrl/voices/im_nicola.bin',
-      language: 'it-IT',
-      gender: 'male',
-      accent: 'Italian',
-    ),
-    TtsVoiceInfo(
-      id: 'pf_dora',
-      name: 'Dora (Portuguese)',
-      url: '$_baseUrl/voices/pf_dora.bin',
-      language: 'pt-PT',
-      accent: 'Portuguese',
-    ),
-    TtsVoiceInfo(
-      id: 'pm_alex',
-      name: 'Alex (Portuguese)',
-      url: '$_baseUrl/voices/pm_alex.bin',
-      language: 'pt-PT',
-      gender: 'male',
-      accent: 'Portuguese',
-    ),
-    TtsVoiceInfo(
-      id: 'pm_santa',
-      name: 'Santa (Portuguese)',
-      url: '$_baseUrl/voices/pm_santa.bin',
-      language: 'pt-PT',
-      gender: 'male',
-      accent: 'Portuguese',
-    ),
-  ];
-
-  /// Get voice by ID
+   /// Get voice by ID
   static TtsVoiceInfo? getVoice(String id) {
     try {
       return voices.firstWhere((v) => v.id == id);
-    } catch (_) {
+      } catch (_) {
       return null;
+      }
     }
-  }
 
-  /// Default voice
+   /// Default voice
   static TtsVoiceInfo get defaultVoice =>
-      voices.firstWhere((v) => v.id == 'af_heart', orElse: () => voices.first);
+       voices.firstWhere((v) => v.id == 'af_heart', orElse: () => voices.first);
 
-  /// Group voices by accent
+   /// Group voices by accent
   static Map<String, List<TtsVoiceInfo>> get voicesByAccent {
     final map = <String, List<TtsVoiceInfo>>{};
     for (final v in voices) {
       final key = v.accent ?? 'Other';
       map.putIfAbsent(key, () => []).add(v);
-    }
+      }
     return map;
-  }
+    }
 
-  /// Human-readable labels for each accent key
+   /// Human-readable labels for each accent key
   static Map<String, String> get accentLabels => {
-    'American': 'American',
-    'British': 'British',
-    'Spanish': 'Spanish',
-    'French': 'French',
-    'Japanese': 'Japanese',
-    'Chinese': 'Chinese',
-    'Korean': 'Korean',
-    'Hindi': 'Hindi',
-    'Portuguese': 'Portuguese',
-  };
+       'American': 'American',
+       'British': 'British',
+       'Spanish': 'Spanish',
+       'French': 'French',
+       'Japanese': 'Japanese',
+       'Chinese': 'Chinese',
+       'Korean': 'Korean',
+       'Hindi': 'Hindi',
+       'Portuguese': 'Portuguese',
+    };
 
-  // ── LuxTTS ─────────────────────────────────────────────────
-
-  static const String _luxBaseUrl =
-      'https://huggingface.co/buckets/lovegold/LuxTTS-bucket/resolve/main';
-
-  /// LuxTTS — lightweight ZipVoice-based TTS with voice cloning.
+   // ── LuxTTS — currently unavailable (bucket removed) ────────────
+   /// LuxTTS model — ZipVoice-based TTS with voice cloning.
+   /// NOTE: The HuggingFace bucket has been removed.
   static const LuxTtsModelInfo luxTts = LuxTtsModelInfo(
     id: 'lux-tts',
     name: 'LuxTTS',
     description:
-        'Lightweight ZipVoice-based TTS with high-quality voice cloning. '
-        '48kHz output, 150x realtime on CPU. Apache-2.0 license.',
-    baseUrl: _luxBaseUrl,
-    totalSizeMb: 627,
-    files: [
-      LuxTtsFileInfo(
-        id: 'text_encoder.onnx',
-        name: 'Text Encoder',
-        url: '$_luxBaseUrl/text_encoder.onnx',
-        sizeMb: 17.6,
-      ),
-      LuxTtsFileInfo(
-        id: 'text_encoder_int8.onnx',
-        name: 'Text Encoder (int8)',
-        url: '$_luxBaseUrl/text_encoder_int8.onnx',
-        sizeMb: 5.57,
-      ),
-      LuxTtsFileInfo(
-        id: 'fm_decoder.onnx',
-        name: 'FM Decoder',
-        url: '$_luxBaseUrl/fm_decoder.onnx',
-        sizeMb: 478,
-      ),
-      LuxTtsFileInfo(
-        id: 'fm_decoder_int8.onnx',
-        name: 'FM Decoder (int8)',
-        url: '$_luxBaseUrl/fm_decoder_int8.onnx',
-        sizeMb: 125,
-      ),
-      LuxTtsFileInfo(
-        id: 'config.json',
-        name: 'Config',
-        url: '$_luxBaseUrl/config.json',
-        sizeMb: 0.0007,
-      ),
-      LuxTtsFileInfo(
-        id: 'tokens.txt',
-        name: 'Tokens',
-        url: '$_luxBaseUrl/tokens.txt',
-        sizeMb: 0.0026,
-      ),
-    ],
-  );
+         'ZipVoice-based TTS with high-quality voice cloning. '
+         '48kHz output. Currently unavailable — model source bucket has been removed.',
+    totalSizeMb: 0,
+    files: [],
+    );
 }
